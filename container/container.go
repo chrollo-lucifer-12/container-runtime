@@ -3,14 +3,18 @@ package container
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
 const (
-	containerRootDir = "/var/lib/monster/containers"
+	containerRootDir      = "/var/lib/monster/containers"
+	initSockFilename      = "init.sock"
+	containerSockFilename = "container.sock"
 )
 
 type Container struct {
@@ -44,6 +48,52 @@ func New(opts *NewContainerOpts) (*Container, error) {
 
 	return &c, nil
 
+}
+
+func (c *Container) Init() error {
+	listener, err := net.Listen("unix", filepath.Join(containerRootDir, c.State.ID, initSockFilename))
+	if err != nil {
+		return fmt.Errorf("Listen on init socket: %w", err)
+	}
+
+	defer listener.Close()
+
+	cmd := exec.Command("/proc/self/exe", "reexec", c.State.ID)
+
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("reexec container process: %w", err)
+	}
+
+	c.State.Pid = cmd.Process.Pid
+
+	if err := cmd.Process.Release(); err != nil {
+		return fmt.Errorf("release container process: %w", err)
+	}
+
+	conn, err := listener.Accept()
+	if err != nil {
+		return fmt.Errorf("accept on init sock: %w", err)
+	}
+	defer conn.Close()
+
+	b := make([]byte, 128)
+	n, err := conn.Read(b)
+	if err != nil {
+		return fmt.Errorf("read bytes from init sock connection: %w", err)
+	}
+
+	msg := string(b[:n])
+	if msg != "ready" {
+		return fmt.Errorf("expecting 'ready' but received '%s'", msg)
+	}
+
+	c.State.Status = specs.StateCreated
+
+	return nil
 }
 
 func (c *Container) Save() error {
@@ -93,7 +143,7 @@ func Load(id string) (*Container, error) {
 }
 
 func (c *Container) Delete(force bool) error {
-	if !force || !c.canDelete() {
+	if !force && !c.canDelete() {
 		return fmt.Errorf("container cannot be deleted in current state (%s) try using --force", c.State.Status)
 	}
 
