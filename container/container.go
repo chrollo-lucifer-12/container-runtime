@@ -291,6 +291,36 @@ func (c *Container) Start() error {
 	return nil
 }
 
+func (c *Container) Kill() error {
+	if !c.canKill() {
+		return fmt.Errorf("container cannot be killed in current state (%s)", c.State.Status)
+	}
+
+	process, err := os.FindProcess(c.State.Pid)
+	if err != nil {
+		return fmt.Errorf("find contianer process to delete: %w", err)
+	}
+	if process != nil {
+		process.Kill()
+	}
+
+	c.State.Status = specs.StateStopped
+
+	if c.Spec.Hooks != nil {
+		if err := hooks.ExecHooks(
+			c.Spec.Hooks.Poststop, c.State,
+		); err != nil {
+			fmt.Println("Warning: failed to execute poststop hooks")
+		}
+	}
+
+	return nil
+}
+
+func (c *Container) canKill() bool {
+	return c.State.Status == specs.StateRunning || c.State.Status == specs.StateCreated
+}
+
 func (c *Container) canStart() bool {
 	return c.State.Status == specs.StateCreated
 }
