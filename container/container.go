@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/container-runtime/hooks"
 	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -52,12 +53,29 @@ func New(opts *NewContainerOpts) (*Container, error) {
 }
 
 func (c *Container) Init() error {
+
+	if c.Spec.Hooks != nil {
+		if err := hooks.ExecHooks(
+			c.Spec.Hooks.CreateRuntime, c.State,
+		); err != nil {
+			return fmt.Errorf("exec createruntime hooks: %w", err)
+		}
+	}
+
 	listener, err := net.Listen("unix", filepath.Join(containerRootDir, c.State.ID, initSockFilename))
 	if err != nil {
 		return fmt.Errorf("Listen on init socket: %w", err)
 	}
 
 	defer listener.Close()
+
+	if c.Spec.Hooks != nil {
+		if err := hooks.ExecHooks(
+			c.Spec.Hooks.CreateContainer, c.State,
+		); err != nil {
+			return fmt.Errorf("exec createcontainer hooks: %w", err)
+		}
+	}
 
 	cmd := exec.Command("/proc/self/exe", "reexec", c.State.ID)
 
@@ -132,6 +150,14 @@ func (c *Container) Reexec() error {
 
 	containerConn.Close()
 	listener.Close()
+
+	if c.Spec.Hooks != nil {
+		if err := hooks.ExecHooks(
+			c.Spec.Hooks.StartContainer, c.State,
+		); err != nil {
+			return fmt.Errorf("exec startcontainer hooks: %w", err)
+		}
+	}
 
 	bin, err := exec.LookPath(c.Spec.Process.Args[0])
 	if err != nil {
@@ -211,6 +237,14 @@ func (c *Container) Delete(force bool) error {
 		return fmt.Errorf("delete container directory: %w", err)
 	}
 
+	if c.Spec.Hooks != nil {
+		if err := hooks.ExecHooks(
+			c.Spec.Hooks.Poststop, c.State,
+		); err != nil {
+			fmt.Printf("Warning: failed to exec poststop hooks: %s\n", err)
+		}
+	}
+
 	return nil
 }
 
@@ -221,6 +255,14 @@ func (c *Container) Start() error {
 
 	if !c.canStart() {
 		return fmt.Errorf("container cannot be started in current state (%s)", c.State.Status)
+	}
+
+	if c.Spec.Hooks != nil {
+		if err := hooks.ExecHooks(
+			c.Spec.Hooks.Prestart, c.State,
+		); err != nil {
+			return fmt.Errorf("execute prestart hooks: %w", err)
+		}
 	}
 
 	conn, err := net.Dial(
@@ -237,6 +279,14 @@ func (c *Container) Start() error {
 	conn.Close()
 
 	c.State.Status = specs.StateRunning
+
+	if c.Spec.Hooks != nil {
+		if err := hooks.ExecHooks(
+			c.Spec.Hooks.Poststart, c.State,
+		); err != nil {
+			return fmt.Errorf("exec poststart hooks: %w", err)
+		}
+	}
 
 	return nil
 }
