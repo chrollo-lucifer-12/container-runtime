@@ -47,7 +47,7 @@ func New(opts *NewContainerOpts) (*Container, error) {
 }
 
 func (c *Container) Save() error {
-	if err := os.MkdirAll(filepath.Join(containerRootDir, c.State.ID), 0666); err != nil {
+	if err := os.MkdirAll(filepath.Join(containerRootDir, c.State.ID), 0755); err != nil {
 		return fmt.Errorf("create container directory :%w", err)
 	}
 
