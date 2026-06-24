@@ -8,7 +8,7 @@ func RootCmd() *cobra.Command {
 		SilenceUsage: true,
 	}
 
-	cmd.AddCommand(startCmd(), createCmd(), deleteCmd(), killCmd(), stateCmd())
+	cmd.AddCommand(startCmd(), createCmd(), deleteCmd(), killCmd(), stateCmd(), reexecCmd())
 
 	return cmd
 }
