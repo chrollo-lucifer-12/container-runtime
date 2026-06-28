@@ -79,6 +79,10 @@ func (c *Container) Init() error {
 
 	cmd := exec.Command("/proc/self/exe", "reexec", c.State.ID)
 
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Cloneflags: syscall.CLONE_NEWPID | syscall.CLONE_NEWUTS | syscall.CLONE_NEWNS,
+	}
+
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -115,7 +119,28 @@ func (c *Container) Init() error {
 	return nil
 }
 
+func must(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+func cg() {
+
+	cgroupPath := "/sys/fs/cgroup/minicontainer"
+
+	os.MkdirAll(cgroupPath, 0755)
+
+	must(os.WriteFile(cgroupPath+"/memory.max", []byte("100000000"), 0700))
+
+	must(os.WriteFile(cgroupPath+"/cgroup.procs", []byte(fmt.Sprintf("%d", os.Getpid())), 0700))
+
+}
+
 func (c *Container) Reexec() error {
+
+	cg()
+
 	initConn, err := net.Dial("unix", filepath.Join(containerRootDir, c.State.ID, initSockFilename))
 	if err != nil {
 		return fmt.Errorf("dial init sock: %w", err)
@@ -163,6 +188,11 @@ func (c *Container) Reexec() error {
 	if err != nil {
 		return fmt.Errorf("find path of user process binary: %w", err)
 	}
+
+	must(syscall.Sethostname([]byte("container")))
+	must(syscall.Chroot("./alpinefs/rootfs"))
+	must(syscall.Chdir("/"))
+	must(syscall.Mount("proc", "proc", "proc", 0, ""))
 
 	args := c.Spec.Process.Args
 	env := os.Environ()
