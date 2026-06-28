@@ -33,12 +33,20 @@ func run() {
 func child() {
 	must(syscall.Sethostname([]byte("container")))
 
+	must(syscall.Chroot("./rootfs"))
+
+	must(syscall.Chdir("/"))
+
+	must(syscall.Mount("proc", "proc", "proc", 0, ""))
+
 	cmd := exec.Command(os.Args[2], os.Args[3:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	must(cmd.Run())
+
+	must(syscall.Unmount("proc", 0))
 }
 
 func must(err error) {
